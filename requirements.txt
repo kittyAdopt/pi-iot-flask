@@ -1,0 +1,5 @@
+adafruit-blinka
+adafruit-circuitpython-dht
+flask
+influxdb_client
+python-dotenv

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Raspberry Pi Sensor Dashboard</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; text-align: center; background-color: #f4f7f6; color: #333; }
+        .header { margin: 30px 0; }
+        .live-data-container { display: flex; justify-content: center; gap: 40px; margin-bottom: 40px; }
+        .card { background-color: white; padding: 25px 40px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+        .sensor-data { font-size: 2.5em; font-weight: 300; }
+        .label { font-size: 1em; font-weight: bold; color: #555; display: block; margin-bottom: 5px; }
+        .chart-container { background-color: white; margin: 0 auto 50px auto; padding: 20px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); max-width: 90%; width: 800px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Raspberry Pi Sensor Dashboard</h1>
+    </div>
+
+    <div class="live-data-container">
+        <div class="card">
+            <span class="label">TEMPERATURE</span>
+            <span class="sensor-data"><span id="temperature">--</span> &deg;C</span>
+        </div>
+        <div class="card">
+            <span class="label">HUMIDITY</span>
+            <span class="sensor-data"><span id="humidity">--</span> %</span>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="sensorHistoryChart"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <script>
+        // Function to update the live data panels
+        async function updateLiveData() {
+            try {
+                const response = await fetch('/data');
+                const data = await response.json();
+                document.getElementById('temperature').textContent = data.temperature;
+                document.getElementById('humidity').textContent = data.humidity;
+            } catch (error) {
+                console.error('Error fetching live data:', error);
+                document.getElementById('temperature').textContent = 'Error';
+                document.getElementById('humidity').textContent = 'Error';
+            }
+        }
+
+        // Function to create and update the history chart
+        async function renderHistoryChart() {
+            try {
+                const response = await fetch('/history_data');
+                const data = await response.json();
+
+                const ctx = document.getElementById('sensorHistoryChart').getContext('2d');
+                
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.timestamps,
+                        datasets: [{
+                            label: 'Temperature (°C)',
+                            data: data.temperatures,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderWidth: 2,
+                            yAxisID: 'y',
+                            tension: 0.1,
+                            pointRadius: 2,
+                            fill: true,
+                        }, {
+                            label: 'Humidity (%)',
+                            data: data.humidities,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderWidth: 2,
+                            yAxisID: 'y1',
+                            tension: 0.1,
+                            pointRadius: 2,
+                            fill: true,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    tooltipFormat: 'yyyy-MM-dd HH:mm',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Time'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Temperature (°C)',
+                                    color: 'rgba(255, 99, 132, 1)'
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Humidity (%)',
+                                    color: 'rgba(54, 162, 235, 1)'
+                                },
+                                grid: {
+                                    drawOnChartArea: false, // only want the grid lines for one axis to show up
+                                },
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Sensor Data - Last 8 Hours (5 min average)',
+                                font: {
+                                    size: 18
+                                }
+                            },
+                            legend: {
+                                position: 'top',
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error rendering chart:', error);
+            }
+        }
+
+        // Initial load and periodic refresh
+        document.addEventListener('DOMContentLoaded', (event) => {
+            renderHistoryChart();
+            updateLiveData();
+            // Refresh live data every 15 seconds
+            setInterval(updateLiveData, 15000);
+        });
+    </script>
+</body>
+</html>
