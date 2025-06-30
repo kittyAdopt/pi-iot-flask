@@ -7,6 +7,14 @@ WORKDIR /app
 # Copy the requirements file into the container at /app
 COPY requirements.txt /app/requirements.txt
 
+# Install system dependencies that might be required by Adafruit libraries
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    python3.12-dev \
+    libgpiod2 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
