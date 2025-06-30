@@ -120,5 +120,6 @@ docker-compose down -v
 
 ## Development Notes
 
-*   The Flask app (`flask_app/app.py`) and the data collection script (`data_processor/save_data_to_db.py`) both load InfluxDB connection details from environment variables, which are supplied via the `.env` file in the Docker Compose setup.
+*   The Flask app (`flask_app/app.py`) runs with `debug=False` by default when using the Docker setup, which is recommended for production or staging environments.
+*   The Flask app and the data collection script (`data_processor/save_data_to_db.py`) both load InfluxDB connection details from environment variables, which are supplied via the `.env` file in the Docker Compose setup (or via `--env-file` if using `docker run`).
 *   The `adafruit-blinka` and `adafruit-circuitpython-dht` libraries in `data_processor/requirements.txt` are for interacting with hardware sensors on single-board computers like Raspberry Pi. If you run the `data-processor` container on a machine without this hardware or appropriate emulation, the script might log errors but is designed to handle `RuntimeError` exceptions and continue attempting to read.Tool output for `overwrite_file_with_block`:
