@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  flask-app:
+    build: ./flask_app
+    ports:
+      - "5031:5031"
+    env_file:
+      - .env
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+
+  data-processor:
+    build: ./data_processor
+    env_file:
+      - .env
+    depends_on:
+      - influxdb
+    restart: unless-stopped
+    # For Raspberry Pi or other devices with hardware access,
+    # you might need to add privileged mode or map devices:
+    # privileged: true
+    # devices:
+    #   - "/dev/gpiomem:/dev/gpiomem"
+    #   - "/dev/gpiochip0:/dev/gpiochip0" # Adjust device name as necessary
+
+  influxdb:
+    image: influxdb:latest
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./influxdb_data:/var/lib/influxdb2
+    env_file:
+      - influxdb.env
+    restart: unless-stopped
