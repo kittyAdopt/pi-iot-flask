@@ -2,3 +2,4 @@ adafruit-blinka
 adafruit-circuitpython-dht
 influxdb_client
 python-dotenv
+lgpio
