@@ -1,0 +1,108 @@
+name: Build and Deploy pi-iot-flask
+
+on:
+  push:
+    branches:
+      - '**' # Triggers on pushes to all branches
+
+jobs:
+  build_and_push:
+    name: Build and Push to Docker Hub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push data-processor image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./data_processor
+          file: ./data_processor/Dockerfile
+          push: true
+          tags: |
+            pingshian0131/pi-iot-flask:data-processor
+            pingshian0131/pi-iot-flask:data-processor-${{ github.sha }}
+
+      - name: Build and push flask-app image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./flask_app
+          file: ./flask_app/Dockerfile
+          push: true
+          tags: |
+            pingshian0131/pi-iot-flask:latest
+            pingshian0131/pi-iot-flask:${{ github.sha }}
+
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    needs: build_and_push # Ensures build_and_push job completes successfully first
+    # Consider adding a condition here to deploy only from specific branches, e.g.:
+    # if: github.ref == 'refs/heads/main' # Recommended: Uncomment and set your deploy branch
+    steps:
+      - name: Set up Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          args: --advertise-tags=tag:ci-runner --hostname=gh-runner-${{ github.run_id }} --accept-dns=false
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          # IMPORTANT: Replace 'your-deploy-server-tailscale-name' with your server's actual Tailscale MagicDNS name or 100.x.y.z IP address
+          host: your-deploy-server-tailscale-name
+          username: ${{ secrets.DEPLOY_USERNAME }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            # Define project directory on server (adjust if needed)
+            PROJECT_DIR=~/pi-iot-project
+            ENV_FILE_PATH=$PROJECT_DIR/.env
+
+            echo "Creating project and .env directory: $PROJECT_DIR"
+            mkdir -p $PROJECT_DIR
+
+            echo "Writing ENV_FILE_CONTENT to $ENV_FILE_PATH"
+            echo "${{ secrets.ENV_FILE_CONTENT }}" > $ENV_FILE_PATH
+
+            echo "Changing to project directory $PROJECT_DIR"
+            cd $PROJECT_DIR
+
+            echo "Stopping existing containers..."
+            docker stop db-process pi-iot-flask || true
+
+            echo "Removing existing containers..."
+            docker rm db-process pi-iot-flask || true
+
+            echo "Removing old images..."
+            docker rmi pingshian0131/pi-iot-flask:data-processor || true
+            docker rmi pingshian0131/pi-iot-flask:latest || true
+
+            echo "Pulling latest images from Docker Hub..."
+            docker pull pingshian0131/pi-iot-flask:data-processor
+            docker pull pingshian0131/pi-iot-flask:latest
+
+            echo "Running data-processor container..."
+            docker run -d --name db-process \
+              --env-file $ENV_FILE_PATH \
+              --privileged \
+              --device /dev/gpiomem \
+              --device /dev/gpiochip0 \
+              pingshian0131/pi-iot-flask:data-processor
+
+            echo "Running flask-app container..."
+            docker run -d --name pi-iot-flask \
+              -p "5031:5031" \
+              --env-file $ENV_FILE_PATH \
+              --restart=always \
+              pingshian0131/pi-iot-flask:latest
+
+            echo "Deployment finished."

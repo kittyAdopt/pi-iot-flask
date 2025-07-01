@@ -124,4 +124,62 @@ docker-compose down -v
 *   The Flask app (`flask_app/app.py`) runs with `debug=False` by default when using the Docker setup, which is recommended for production or staging environments.
 *   The Flask app and the data collection script (`data_processor/save_data_to_db.py`) both load InfluxDB connection details from environment variables, which are supplied via the `.env` file in the Docker Compose setup (or via `--env-file` if using `docker run`).
 *   The `adafruit-blinka`, `adafruit-circuitpython-dht`, and `lgpio` (Python bindings for `libgpiod`) libraries in `data_processor/requirements.txt` are for interacting with hardware sensors.
-*   **Hardware Access for `data-processor`**: To allow the `data-processor` container to access host GPIO hardware (e.g., on a Raspberry Pi), you **must** configure it with appropriate permissions. In `docker-compose.yml`, uncomment and use `privileged: true` or specific `devices` mappings (like `/dev/gpiomem`). This is crucial because even with the necessary libraries (`libgpiod2`, `lgpio`) installed in the container, it still needs permission to interact with the host's hardware. Without these Docker permissions, `adafruit-blinka` will likely fail to detect the hardware or time out, leading to errors in `save_data_to_db.py`. If you run the container on a machine without physical sensor hardware or appropriate emulation/permissions, the script might log errors but is designed to handle `RuntimeError` exceptions and continue attempting to read.
+*   **Hardware Access for `data-processor`**: To allow the `data-processor` container to access host GPIO hardware (e.g., on a Raspberry Pi), you **must** configure it with appropriate permissions. In `docker-compose.yml` (for local development) or in the `docker run` command (used by the GitHub Actions deploy step), ensure options like `--privileged` and/or `--device /dev/gpiomem --device /dev/gpiochip0` are used. This is crucial because even with the necessary libraries (`libgpiod2`, `lgpio`) installed in the container, it still needs permission to interact with the host's hardware. Without these Docker permissions, `adafruit-blinka` will likely fail to detect the hardware or time out, leading to errors in `save_data_to_db.py`. If you run the container on a machine without physical sensor hardware or appropriate emulation/permissions, the script might log errors but is designed to handle `RuntimeError` exceptions and continue attempting to read.
+
+## CI/CD with GitHub Actions
+
+This project includes a GitHub Actions workflow defined in `.github/workflows/main.yml` that automates building Docker images and deploying the application.
+
+### Workflow Overview
+
+The workflow consists of two main jobs:
+
+1.  **`build_and_push`**:
+    *   Triggered on every push to any branch.
+    *   Checks out the source code.
+    *   Logs into Docker Hub.
+    *   Builds two Docker images:
+        *   `pingshian0131/pi-iot-flask:data-processor` (from `data_processor/Dockerfile`)
+        *   `pingshian0131/pi-iot-flask:latest` (from `flask_app/Dockerfile`)
+    *   Tags the images with both a static tag (e.g., `latest`, `data-processor`) and a dynamic tag based on the Git commit SHA (e.g., `data-processor-a1b2c3d`).
+    *   Pushes these images to Docker Hub.
+
+2.  **`deploy`**:
+    *   Depends on the successful completion of the `build_and_push` job.
+    *   **Warning**: This job currently triggers on pushes to *any branch*. It is highly recommended to modify the workflow to restrict deployment to a specific branch (e.g., `main`) by adding a conditional like `if: github.ref == 'refs/heads/main'` to the `deploy` job definition.
+    *   **Tailscale Integration**:
+        *   The job first establishes a Tailscale connection from the GitHub Actions runner to your private network. This allows secure access to your deployment server without exposing it directly to the internet.
+        *   It uses a `TAILSCALE_AUTH_KEY` secret (an ephemeral auth key with appropriate tags like `tag:ci-runner` is recommended).
+        *   The SSH connection (`appleboy/ssh-action`) then connects to your server using its Tailscale MagicDNS name or Tailscale IP address (e.g., `your-deploy-server-tailscale-name` or `100.x.y.z`). You will need to replace the placeholder in the workflow with your server's actual Tailscale address.
+    *   Creates a `.env` file on the server using the content of the `ENV_FILE_CONTENT` GitHub secret.
+    *   Stops and removes any existing `db-process` and `pi-iot-flask` containers.
+    *   Removes the `pingshian0131/pi-iot-flask:data-processor` and `pingshian0131/pi-iot-flask:latest` Docker images from the server to ensure fresh images are pulled.
+    *   Pulls the latest images from Docker Hub.
+    *   Starts the `db-process` container using `pingshian0131/pi-iot-flask:data-processor`.
+    *   Starts the `pi-iot-flask` container using `pingshian0131/pi-iot-flask:latest`.
+
+### Required GitHub Secrets
+
+To use this workflow, you need to configure the following secrets in your GitHub repository settings (`Settings > Secrets and variables > Actions`):
+
+*   `DOCKERHUB_USERNAME`: Your Docker Hub username.
+*   `DOCKERHUB_TOKEN`: Your Docker Hub Personal Access Token (PAT) with read/write permissions.
+*   `TAILSCALE_AUTH_KEY`: A Tailscale auth key (ephemeral and tagged recommended, e.g., with `tag:ci-runner`) to allow the GitHub Actions runner to join your tailnet.
+*   `DEPLOY_USERNAME`: The username for SSH login to your deployment server.
+*   `DEPLOY_SSH_KEY`: The private SSH key (ensure the public key is in the server's `authorized_keys`) for connecting to your deployment server.
+*   `ENV_FILE_CONTENT`: The complete content of your application's `.env` file. This file contains sensitive information like InfluxDB credentials.
+*   Note: The `DEPLOY_HOST` secret is no longer directly used by the SSH action if using Tailscale; instead, you modify the workflow file to include the server's Tailscale name/IP.
+
+### Workflow Assumptions
+
+*   **Tailscale Setup**:
+    *   Your deployment server must be running Tailscale and be part of your tailnet.
+    *   You should have appropriate Tailscale ACLs configured to allow nodes tagged as `tag:ci-runner` (or your chosen tag) to connect to your deployment server on the SSH port (e.g., port 22).
+    *   The workflow file's `deploy` job needs to have the `host` field for the SSH action updated from the placeholder `your-deploy-server-tailscale-name` to your server's actual Tailscale MagicDNS name or IP address.
+*   **InfluxDB**: The workflow assumes that an InfluxDB instance is already running and accessible to the application containers on the deployment server, as configured in your `.env` file.
+*   **Server Setup**: The deployment server needs to have Docker installed and the SSH user must have permissions to run Docker commands.
+*   **Project Directory**: The deploy script creates a project directory (default `~/pi-iot-project`) on the server to store the `.env` file. The `docker run` commands use this `.env` file.
+
+### Important Security Note for `ENV_FILE_CONTENT`
+
+Storing the entire `.env` file content as a GitHub secret is convenient but means this sensitive data is accessible within the GitHub Actions environment. For production systems with highly sensitive data, consider using a dedicated secrets management solution (e.g., HashiCorp Vault, AWS Secrets Manager) and fetching secrets at deploy time, or ensuring the `.env` file is securely managed directly on the server outside of the CI/CD push.
