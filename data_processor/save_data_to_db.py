@@ -2,11 +2,14 @@ import os
 import time
 import board
 import adafruit_dht
+import logging
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # --- InfluxDB Configuration ---
 INFLUXDB_URL = os.environ.get("INFLUXDB_URL", "")
@@ -38,7 +41,7 @@ def main():
             humidity = dhtDevice.humidity
 
             if temperature_c is not None and humidity is not None:
-                print(f"Temp: {temperature_c:.1f} C / Humidity: {humidity:.1f} %")
+                logger.warning(f"Temp: {temperature_c:.1f} C / Humidity: {humidity:.1f} %")
 
                 point = Point("environment") \
                     .tag("location", "living_room") \
@@ -49,10 +52,10 @@ def main():
                 write_api.write(bucket=INFLUXDB_BUCKET, org=INFLUXDB_ORG, record=point)
 
             else:
-                print("Failed to retrieve reading. Trying again...")
+                logger.warning("Failed to retrieve reading. Trying again...")
 
         except RuntimeError as error:
-            print(error.args[0])
+            logger.warning(error.args[0])
             time.sleep(2.0)
             continue
         except Exception as e:
